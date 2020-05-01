@@ -1,0 +1,570 @@
+---
+title: "Hernandez_Esteban_ADO_PEC1"
+author: "Esteban Hernández Maldonado"
+date: "1 5 2020"
+output:
+  bookdown::pdf_document2: default
+  bookdown::pdfbook: default
+bibliography: references.bib
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, 
+                      comment = NA, prompt = TRUE, tidy = FALSE, 
+                      fig.width = 7, fig.height = 7, fig_caption = TRUE,
+                      cache=FALSE)
+```
+
+**Repositorio de Github: https://github.com/ehm2411/PEC1_ADO**  
+
+# Resumen
+
+El siguiente estudio de microarrays es la primera práctica de evaluación continua (PEC) de la asignatura **Análisis de datos ómicos** que se imparte en la Universitat Oberta de Catalunya (UOC). Para la realización de esta práctica vamos a seguir como guía principal el caso resuelto **Omics_Data_Analysis-Case_Study_1-Microarrays**, pero teniendo en cuenta lo aprendido a través de los materiales del curso y en los foros de la asignatura. El estudio a tratar  se titula **Expression data from mice normal Macrophage and multiple myeloma tumor-associated macrophages (TAMs) **
+
+# Objetivos
+
+Los macrófagos asociados a tumores (en inglés, TAM) son importantes células promotoras de tumores. Sin embargo, los mecanismos subyacentes en la forma en que el tumor y su microambiente reprograman estas células siguen siendo esquivos. Aquí informamos que los lípidos juegan un papel crucial en la generación de TAM en el microambiente tumoral (TME). Los macrófagos de los tejidos tumorales humanos y murinos se enriquecieron con lípidos debido al aumento de la absorción de lípidos por los macrófagos. Los TAM expresaron niveles elevados del receptor del captador CD36, lípidos acumulados y utilizaron oxidación de ácidos grasos (FAO) en lugar de glucólisis para obtener energía. Los altos niveles de la FAO promovieron la fosforilación oxidativa mitocondrial, la producción de especies reactivas de oxígeno, la fosforilación de JAK1 y la desfosforilación de SHP1, lo que condujo a la activación y transcripción de genes STAT6 que regulan la generación y función de TAM. Estos procesos fueron críticos para la polarización y actividad de TAM, tanto in vitro como in vivo. En resumen, destacamos la importancia del metabolismo de los lípidos en la diferenciación y la función de los TAM de los tumores en el TME. 
+
+# Materiales y Métodos
+
+## Materiales
+
+### Software
+
+Para esta práctica se ha utilizado el siguiente software:  
+
+* R version 3.6.3 (2020-02-29)
+* RStudio Version 1.2.5033
+* Bioconductor Version 3.10
+* Sistema Operativo: Windows 10
+
+### Datos
+Los datos se han extraído de un estudio con microarrays sobre datos de expresión de células macrófagas normales y asociadas a tumor. El estudio fue subido a la web del *Gene Expression Omnibus * con el numero de acceso **GSE143025** y puede ser accedido en : https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE143025
+
+Tenemos un total de 12 muestras con dos factores CD36 (Wild/OK) y tipo de macrófago (Asociado a tumor -TAM- o normal -NOR-). Las muestras están equitativamente repartidas en las 4 combinaciones posibles de estos dos factores.
+
+## Métodos
+
+### Instalación a carga de los paquetes de R 
+
+Se han instalado librerías genéricas de R y además otras específicas de Bioconductor.
+
+```{r librerias, include=TRUE, message=FALSE, results='hide', warning=FALSE}
+if (!require("ggplot2"))     install.packages("ggplot2")
+if (!require("ggrepel"))     install.packages("ggrepel")
+if (!require("kableExtra"))     install.packages("kableExtra")
+```
+
+```{r bioconductor, include=TRUE, message=FALSE, results='hide', warning=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+#BiocManager::install()
+
+# Bioconductor packages  
+if (!require("Biobase"))             BiocManager::install("Biobase")
+if (!require("oligo"))               BiocManager::install("oligo")
+if (!require("pd.mogene.2.0.st"))    BiocManager::install("pd.mogene.2.0.st")
+if (!require("arrayQualityMetrics")) BiocManager::install("arrayQualityMetrics")
+#BiocManager::install("lima")
+
+library(Biobase)
+library(oligo)
+library(pd.mogene.2.0.st)
+library(arrayQualityMetrics)
+```
+
+
+### Preparación del entorno
+
+Se han creado las subcarpetas "data" y "results" desde Windows Explorer. 
+En "data" se guardaron los 12 ficheros .CEL descargados de la página del estudio en GEO así como el fichero targets que fue creado de manera manual.
+
+### Preparar los datos para el análisis
+
+Primero hemos creado manualmente el fichero *targets*. En él se puede ver como hay tres muestras para cada una de las cuatro combinaciones posibles de los dos factores.
+
+```{r lecturaTargets, include=TRUE, results='hold'}
+targets <- read.csv2("./data/targets.csv", header = TRUE, sep = ",")
+knitr::kable(targets, booktabs = TRUE, caption = 'Contenido del fichero targets usado en este análsis')
+```
+
+### Leer los ficheros CEL
+
+Ahora leemos los ficheros CEL y asociamos el fichero tarjets
+
+```{r lecturaCEL, include=FALSE, message=FALSE, results='hide', warning=FALSE}
+# los ficheros CEL fueron descargados de la página del estudio
+celFiles <- list.celfiles("./data", full.names = TRUE)
+
+targets <- read.csv2("./data/targets.csv", header = TRUE, sep = ",") 
+
+my.targets <-read.AnnotatedDataFrame(file.path("./data","targets.csv"), 
+                                     header = TRUE, row.names = 1, 
+                                     sep=",")
+
+
+
+rawData <- read.celfiles(celFiles, phenoData = my.targets)
+```
+
+```{r cambios, include=TRUE, message=FALSE, results=TRUE, warning=FALSE}
+my.targets@data$ShortName->rownames(pData(rawData))
+colnames(rawData) <-rownames(pData(rawData)) 
+rownames(pData(rawData))
+```
+
+### Control de calidad del rawdata
+
+Una vez cargado el rawdata procedemos, con su control de calidad mediante la librería *arrayQualityMetrics*. Los ficheros resultantes están en la carpeta *arrayQualityMetrics report for rawData*.   
+```{r QCRaw, include=FALSE, message=FALSE, results='hide', warning=FALSE, eval=TRUE}
+library(arrayQualityMetrics)
+arrayQualityMetrics(rawData,force=TRUE)
+```
+
+Podemos observar que sólo hay presencia de outliers según Boxplots con la muestra 11, y tenemos dos outliers en las muestras 11 y 12 según los MA plots.
+
+```{r QCRawDataRes, fig.cap="Aspecto del resumen, en el fichero index.html, producido por el paquete arrayQualityMetrics sobre los datos crudos", echo=FALSE}
+knitr::include_graphics("figures/figure1.png")
+```
+
+El análisis de componentes principales nos muestra que las dos componentes principales explican algo más del 70% del modelo (PC1: 48.9% , PC2: 23.2%)
+
+```{r , echo=FALSE, message=FALSE, results='hide', warning=FALSE}
+library(ggplot2)
+library(ggrepel)
+plotPCA3 <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
+  data <- prcomp(t(datos),scale=scale)
+  # plot adjustments
+  dataDf <- data.frame(data$x)
+  Group <- factor
+  loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+  # main plot
+  p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+    theme_classic() +
+    geom_hline(yintercept = 0, color = "gray70") +
+    geom_vline(xintercept = 0, color = "gray70") +
+    geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+    coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+    scale_fill_discrete(name = "Group")
+  # avoiding labels superposition
+  p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),segment.size = 0.25, size = size) + 
+    labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+    ggtitle(paste("Principal Component Analysis for: ",title,sep=" "))+ 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=colores)
+  }
+```
+
+```{r PCARaw, message=FALSE, fig.cap="Visualización de las dos componentes principales para rawdata"}
+plotPCA3(exprs(rawData), labels = targets$ShortName, factor = targets$Group, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("red", "blue", "green", "yellow"))
+```
+
+De la misma manera, se puede visualizar la distribución de la intensidad usando boxplots. La figura \@ref(fig:BoxplotRaw) muestra un boxplot múltiple describiendo las distribución de las intensidades a lo largo de todas las muestras. Observaremos una pequeña variación en las mismas, pero está dentro de lo normal para datos sin normalizar. 
+
+```{r BoxplotRaw, echo=FALSE, message=FALSE, fig.cap="Boxplot para intensidades de arrays (Raw Data)"}
+boxplot(rawData, cex.axis=0.5, las=2,  which="all", 
+         col = c(rep("red", 3), rep("blue", 3), rep("green", 3), rep("yellow", 3)),
+         main="Distribucion de los valores de intensidad")
+```
+
+### Normalización de los datos
+
+Se utiliza el método RMA para normalizar los datos. 
+```{r Normalization, echo=FALSE, message=FALSE, results="hide"}
+eset_rma <- rma(rawData)
+```
+
+### Control de calidad de los datos normalizados
+
+Volvemos aplicar los mismo controles de calidad para los datos normalizados.
+```{r QCNorm, echo=FALSE, message=FALSE, warning=FALSE , eval=TRUE}
+library(arrayQualityMetrics)
+arrayQualityMetrics(eset_rma, outdir = file.path("./results", "QCDir.Norm"), force=TRUE)
+```
+
+
+```{r PCANorm, message=FALSE, fig.cap="Visualización de las dos componentes principales de los datos normalizados"}
+plotPCA3(exprs(eset_rma), labels = targets$ShortName, factor = targets$Group, 
+         title="Datos Normalizados", scale = FALSE, size = 3, 
+         colores = c("red", "blue", "green", "yellow"))
+```
+
+```{r BoxplotNorm, message=FALSE, fig.cap="Distribución de las intensidades para los datos normalizados"}
+boxplot(eset_rma, cex.axis=0.5, las=2,  which="all", 
+         col = c(rep("red", 3), rep("blue", 3), rep("green", 3), rep("yellow", 3)),
+         main="Boxplot de  intensidad: Datos normalizados")
+```
+
+### Detección de los genes más variables
+
+Vamos a ver que genes son los que más varían. En \@ref(fig:SDplot) podemos ver que los genes más variables son aquellos con una desviación típica por evema de 90-95% de todas las desviaciones típicas.
+
+```{r SDplot, fig.cap="Valores de la desviación típica a lo largo de todas las muestras pra todos los genes ordenados de menor a mayor"}
+sds <- apply (exprs(eset_rma), 1, sd)
+sdsO<- sort(sds)
+plot(1:length(sdsO), sdsO, main="Distribución de la variabilidad para todos los genes",
+     sub="Las líneas verticales representan los percentiles 90% y 95%",
+     xlab="Índice del Gen (de menos a más diferente)", ylab="Desviación típica")
+abline(v=length(sds)*c(0.9,0.95))
+```
+
+### Filtraje de los genes menos variables 
+
+Vamos a continuar con el proceso de filtraje y para ello vamos a utilizar la funcion *nsFilter* del paquete *genefilter*.  
+
+
+```{r Filtering1, results='hide', message=FALSE}
+library(genefilter)
+library(mogene21sttranscriptcluster.db)
+annotation(eset_rma) <- "mogene21sttranscriptcluster.db"
+filtered <- nsFilter(eset_rma, 
+                     require.entrez = TRUE, remove.dupEntrez = TRUE,
+                     var.filter=TRUE, var.func=IQR, var.cutoff=0.75, 
+                     filterByQuantile=TRUE, feature.exclude = "^AFFX")
+```
+
+```{r FilterResults, results='hide', echo=FALSE, message=FALSE}
+eset_filtered <-filtered$eset
+```
+
+
+
+### Guardando datos normalizados y filtrados
+
+Guardamos los ficheros obtenidos hasta ahora.
+
+```{r SaveData1, results='hide', message=FALSE}
+write.csv(exprs(eset_rma), file="./results/normalized.Data.csv")
+write.csv(exprs(eset_filtered), file="./results/normalized.Filtered.Data.csv")
+save(eset_rma, eset_filtered, file="./results/normalized.Data.Rda")
+```
+
+
+### Matriz de diseño
+
+Vamos a crear la matriz de diseño. Recordemos que tenemos 2 factores de dos niveles cada uno que se pueden agrupar en un factor de 4 niveles.
+
+```{r LoadSavedData, echo=FALSE}
+if (!exists("eset_filtered")) load (file="./results/normalized.Data.Rda")
+```
+
+```{r DesignMatrix, message=FALSE}
+library(limma)
+designMat<- model.matrix(~0+Group, pData(eset_filtered))
+colnames(designMat) <- c("KO.NOR", "KO.TAM", "WT.NOR", "WT.TAM")
+print(designMat)
+```
+
+
+### Definiendo comparaciones con la matriz de contrastes
+
+Vamos a haver las comparaciones de los genotipos KT vs OK en macrófagos normales y en macrófagos TAM. También haremos una comparación global.
+
+```{r setContrasts}
+cont.matrix <- makeContrasts (KOvsWT.NOR = KO.NOR-WT.NOR,
+                              KOvsWT.TAM = KO.TAM-WT.TAM,
+                              INT = (KO.NOR-WT.NOR) - (KO.TAM-WT.TAM),
+                              levels=designMat)
+print(cont.matrix)
+```
+
+### Estimación del modelo y selección de genes
+
+Con los datos filtrados y con la matriz de diseño, creamos un modelo utilizando la función lmFit.
+
+```{r, linearmodelfit, echo=FALSE}
+library(limma)
+fit<-lmFit(eset_filtered, designMat)
+fit.main<-contrasts.fit(fit, cont.matrix)
+fit.main<-eBayes(fit.main)
+
+```
+
+### Lista de genes diferencialmente expresados
+
+Para la comparación 1 (KOvsWT.NOR): Genes que cambian su expresión entre KO and WT in macrofagos normales:
+
+```{r, topTabs1}
+topTab_KOvsWT.NOR <- topTable (fit.main, number=nrow(fit.main), coef="KOvsWT.NOR", adjust="fdr") 
+head(topTab_KOvsWT.NOR)
+```
+
+Para la comparación 2 (KOvsWT.TAM): Genes que cambian su expresión entre KO and WT en macrofagos tipo TAM:
+
+```{r, topTabs2}
+topTab_KOvsWT.TAM <- topTable (fit.main, number=nrow(fit.main), coef="KOvsWT.TAM", adjust="fdr") 
+head(topTab_KOvsWT.TAM)
+```
+
+Para la comparación 3 (INT): Genes que se comportan diferente entre la comparación 1 y la comparación 2:
+
+```{r, topTabs3}
+topTab_INT  <- topTable (fit.main, number=nrow(fit.main), coef="INT", adjust="fdr") 
+head(topTab_INT)
+```
+
+La primera columna de cada topTable contiene el ID de Affymetrix para cada muestra. El siguiente paso es averiguar que gen corresponde con cada ID. Esete proceso se llama *anotación*.   
+
+
+### Anotación de genes
+
+
+```{r GeneAnnotation, echo=FALSE, message=FALSE, warning=FALSE}
+annotatedTopTable <- function(topTab, anotPackage)
+{
+  topTab <- cbind(PROBEID=rownames(topTab), topTab)
+  myProbes <- rownames(topTab)
+  thePackage <- eval(parse(text = anotPackage))
+  geneAnots <- select(thePackage, myProbes, c("SYMBOL", "ENTREZID", "GENENAME"))
+  annotatedTopTab<- merge(x=geneAnots, y=topTab, by.x="PROBEID", by.y="PROBEID")
+return(annotatedTopTab)
+}
+```
+
+```{r annotateTopTables, echo=FALSE}
+topAnnotated_KOvsWT.NOR <- annotatedTopTable(topTab_KOvsWT.NOR,anotPackage="mogene21sttranscriptcluster.db")
+topAnnotated_KOvsWT.TAM <- annotatedTopTable(topTab_KOvsWT.TAM,anotPackage="mogene21sttranscriptcluster.db")
+topAnnotated_INT <-        annotatedTopTable(topTab_INT,       anotPackage="mogene21sttranscriptcluster.db")
+write.csv(topAnnotated_KOvsWT.NOR, file="./results/topAnnotated_KOvsWT_NOR.csv")
+write.csv(topAnnotated_KOvsWT.TAM, file="./results/topAnnotated_KOvsWT_TAM.csv")
+write.csv(topAnnotated_INT,        file="./results/topAnnotated_INT.csv")
+```
+
+Hemos obtenido tres tablas de anotaciones, se pueden consultar en la carpeta *results* de este proyecto con los nombres *topAnnotated_KOvsWT_NOR.csv, topAnnotated_KOvsWT_TAM.csv y topAnnotated_INT.csv*. No se muestra su contenido en este informe debido a lo grande de su tamaño, pero mostramos por los primeros registros de "KOvsWT.TAM".
+
+```{r annotatedTop, echo=FALSE}
+short<- head(topAnnotated_KOvsWT.TAM[1:5,1:4])
+ library(kableExtra)
+ knitr::kable(
+   short, booktabs = TRUE,
+   caption = 'Anotaciones añadidas a los resultados "topTable" para la comparación "KOvsWT.TAM"')
+show(short)
+```
+
+### Visualizando expresión diferencial
+
+Vamos a utilizar los "Volcano Plots", la figura \@ref(fig:volcanoPlot) muestra un volcano plot para la comparación entre KO and WT. los nombres de los genes top 4son mostrados en el gráfico.
+
+```{r volcanoPlot, fig.cap="Volcano plot para la comparación entre KO y WT. El nombre de los 4 están mostrados en la gráfica", echo=FALSE}
+library(mogene21sttranscriptcluster.db)
+geneSymbols <- select(mogene21sttranscriptcluster.db, rownames(fit.main), c("SYMBOL"))
+SYMBOLS<- geneSymbols$SYMBOL
+volcanoplot(fit.main, coef=1, highlight=4, names=SYMBOLS, 
+            main=paste("Genes diferencialmente expresados", colnames(cont.matrix)[1], sep="\n"))
+  abline(v=c(-1,1))
+```
+
+```{r saveVolcanos, echo=FALSE, results='hide'}
+pdf("figures/Volcanos.pdf")
+for (i in colnames(cont.matrix)){
+  volcanoplot(fit.main, coef=i, highlight=4, names=SYMBOLS,
+              main=paste("Genes diferencialmente expresados",i, sep="\n"))
+  abline(v=c(-1,1))
+}
+dev.off()
+```
+
+### Comparaciones múltiples
+
+Vamos a utilizar las funciones `decideTests` y `VennDiagram` del paquete limma.
+
+```{r decideTests.1, echo=FALSE}
+library(limma)
+res<-decideTests(fit.main, method="separate", adjust.method="fdr", p.value=0.1, lfc=1)
+```
+
+Ontenemos tantas columnas como comparaciones y tantas filas como genes. La significacia es indicada con los valores +1 y -1 miestras que 0 indica no significancia.
+
+```{r resumeDecideTests}
+sum.res.rows<-apply(abs(res),1,sum)
+res.selected<-res[sum.res.rows!=0,] 
+print(summary(res))
+```
+
+Podemos visualizar estos datos con un diagrama de Venn. 
+
+```{r, vennDiagram, fig.cap="Diagrama de Venn mostrando los genes in común entre las tres comparaciones"}
+vennDiagram (res.selected[,1:3], cex=0.9)
+title("Genes en común entre las tres comparaciones\n Genes seleccionados con FDR < 0.1 and logFC > 1")
+```
+
+
+### Heatmaps
+
+Los genes seleccionados como diferencialmente expresados puede ser visualizados mediante un Heatmap.
+
+```{r data4Heatmap}
+probesInHeatmap <- rownames(res.selected)
+HMdata <- exprs(eset_filtered)[rownames(exprs(eset_filtered)) %in% probesInHeatmap,]
+
+geneSymbols <- select(mogene21sttranscriptcluster.db, rownames(HMdata), c("SYMBOL"))
+SYMBOLS<- geneSymbols$SYMBOL
+rownames(HMdata) <- SYMBOLS
+write.csv(HMdata, file = file.path("./results/data4Heatmap.csv"))
+```
+
+Con los datos seleccionados un heatmap puede ser generado con o sin agrupar genes o/y muestras.
+
+
+La figura \@ref(fig:heatmapNoclustering) muestra un heatmap producido por todos los genes selecionados con el mismo criterio (FDR < 0.1 and logFC > 1).
+
+
+```{r heatmapNoclustering, fig.cap="Heatmap para los datos sin ningún grupo"}
+my_palette <- colorRampPalette(c("blue", "red"))(n = 299)
+library(gplots)
+
+heatmap.2(HMdata,
+          Rowv = FALSE,
+          Colv = FALSE,
+          main = "Diferencia de genes expresada \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("red",3),rep("blue",3), rep("green",3), rep("yellow",3)),
+          tracecol = NULL,
+          dendrogram = "none",
+          srtCol = 30)
+```
+
+Figure \@ref(fig:heatmapClustering) muestra un heatmap producido por todos los genes seleccionados con el mismo criterio (FDR < 0.1 and logFC > 1) donde los genes y muestras son forzados a agruparse por similaridad de fila y columna.
+
+```{r heatmapClustering, fig.cap="Heatmap for expression data grouping genes (rows) and samples (columns) by their similarity"}
+heatmap.2(HMdata,
+          Rowv = TRUE,
+          Colv = TRUE,
+          dendrogram = "both",
+          main = "Diferencia de genes expresada \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("red",3),rep("blue",3), rep("green",3), rep("yellow",3)),
+          tracecol = NULL,
+          srtCol = 30)
+
+```
+
+
+### Significacia biológica
+
+Hay muchas variantes para hacer este tipo de análisis, ver @Khatri2012,  pero se usará aquí el analisis implementado por el paquete `ReactomePA`.  The analysis se realiza con las anotaciones de ReactomePA  [https://reactome.org/](https://reactome.org/).
+
+```{r selectGenes, echo=FALSE}
+listOfTables <- list(KOvsWT.NOR = topTab_KOvsWT.NOR, 
+                     KOvsWT.TAM  = topTab_KOvsWT.TAM, 
+                     INT = topTab_INT)
+listOfSelected <- list()
+for (i in 1:length(listOfTables)){
+  # select the toptable
+  topTab <- listOfTables[[i]]
+  # select the genes to be included in the analysis
+  whichGenes<-topTab["adj.P.Val"]<0.15
+  selectedIDs <- rownames(topTab)[whichGenes]
+  # convert the ID to Entrez
+  EntrezIDs<- select(mogene21sttranscriptcluster.db, selectedIDs, c("ENTREZID"))
+  EntrezIDs <- EntrezIDs$ENTREZID
+  listOfSelected[[i]] <- EntrezIDs
+  names(listOfSelected)[i] <- names(listOfTables)[i]
+}
+sapply(listOfSelected, length)
+```
+
+
+```{r, echo=FALSE}
+mapped_genes2GO <- mappedkeys(org.Mm.egGO)
+mapped_genes2KEGG <- mappedkeys(org.Mm.egPATH)
+mapped_genes <- union(mapped_genes2GO , mapped_genes2KEGG)
+```
+
+The Biological significance analysis will be applied only to the first two lists. Sometimes yet another decomposition is applied so that up and downregulated genes are separately analyzed. This will not be done here because there is no clear biological argument to proceed so in all cases.
+
+```{r BiologicalSig}
+library(ReactomePA)
+
+listOfData <- listOfSelected[1:2]
+comparisonsNames <- names(listOfData)
+universe <- mapped_genes
+
+for (i in 1:length(listOfData)){
+  genesIn <- listOfData[[i]]
+  comparison <- comparisonsNames[i]
+  enrich.result <- enrichPathway(gene = genesIn,
+                                 pvalueCutoff = 0.05,
+                                 readable = T,
+                                 pAdjustMethod = "BH",
+                                 organism = "mouse",
+                                 universe = universe)
+  
+  cat("##################################")
+  cat("\nComparison: ", comparison,"\n")
+  print(head(enrich.result))
+
+  if (length(rownames(enrich.result@result)) != 0) {
+  write.csv(as.data.frame(enrich.result), 
+             file =paste0("./results/","ReactomePA.Results.",comparison,".csv"), 
+             row.names = FALSE)
+  
+  pdf(file=paste0("./results/","ReactomePABarplot.",comparison,".pdf"))
+    print(barplot(enrich.result, showCategory = 15, font.size = 4, 
+            title = paste0("Reactome Pathway Analisis para ", comparison,". Barplot")))
+  dev.off()
+  
+  pdf(file = paste0("./results/","ReactomePAcnetplot.",comparison,".pdf"))
+    print(cnetplot(enrich.result, categorySize = "geneNum", schowCategory = 15, 
+         vertex.label.cex = 0.75))
+  dev.off()
+  }
+}
+```
+
+# Resultados
+
+```{r listOfFiles, echo=TRUE}
+listOfFiles <- dir("./results/") 
+knitr::kable(
+  listOfFiles, booktabs = TRUE,
+  caption = 'List of files generated in the analysis',
+  col.names="List_of_Files"
+)
+```
+
+# Discusión
+
+N/A
+
+
+# Conclusión
+
+Este estudio destaca el papel del metabolismo de los lípidos en la diferenciación y función de los TAM y sugiere enfocarse en la oxidación de los ácidos grasos TAM como una modalidad terapéutica potencial para los cánceres humanos.
+
+# Apéndice
+
+## Comentarios sobre la práctica
+
+La realización de esta práctica ha llevado más tiempo del pensado por mí inicialmente. Había querido utilizar el paquete geoQuery para descargar los ficheros CEl y montar el fichero targets de manera automática, pero errores de ejecución que no pude solventar, me hicieron decantar por la manera manual observada en los casos de estudio.
+
+Por otro lado, para la significación biológica, hubiese deseado utilizar el paquete cluterProfiler, pero tampoco pude hacer frente a los problemas encontrado en la ejecución del código.
+
+Ha sido una práctica dura en la que, intentando comprender los conceptos biológicos intrínsecos (de los que carezco), he tenido que dedicar mucho tiempo. Además, el estudio elegido para esta práctica ha sido el tercero, por lo que previamente había empleado tiempo en dos estudios que por las dificultades encontradas tuvieron que ser descartados.
+
+
+## Código R
+
+Se puede consultar el código fuente de ese informe en el documento *hernandez_esteban_ADO_PEC1.rmd, localizado en el directorio principal de este proyecto.
+
+# Referencias

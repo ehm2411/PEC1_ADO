@@ -1,0 +1,7 @@
+GEO
+title: 	Expression data from mice normal MΦs and multiple myeloma tumor-associated macrophages (TAMs)
+https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE143025
+
+Citation
+title: Enhanced Lipid Accumulation and Metabolism Are Required for the Differentiation and Activation of Tumor-Associated Macrophages.
+https://www.ncbi.nlm.nih.gov/pubmed/32015091
